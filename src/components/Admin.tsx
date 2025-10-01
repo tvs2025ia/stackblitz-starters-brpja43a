@@ -2,62 +2,330 @@ import React, { useState } from 'react';
 import { useData } from '../contexts/DataContext';
 import { useStore } from '../contexts/StoreContext';
 import { useAuth } from '../contexts/AuthContext';
-import { FinancialReports } from './FinancialReports';
-import { PaymentMethod, User, Supplier, ReceiptTemplate } from '../types';
+import { SupabaseService } from '../services/supabaseService';
+import { User, Store, PaymentMethod, ReceiptTemplate, Supplier } from '../types';
 import { 
   Settings, 
   Users, 
+  Store as StoreIcon, 
   CreditCard, 
-  Store,
-  Truck,
   FileText,
-  BarChart3,
-  Plus,
-  Edit3,
+  Truck,
+  Plus, 
+  Edit3, 
   Trash2,
   X,
   Check,
   Eye,
   EyeOff,
-  AlertCircle
+  Shield,
+  UserPlus,
+  AlertCircle,
+  Save
 } from 'lucide-react';
 
-// Modal components defined at the top level to avoid initialization errors
-const PaymentMethodModal = ({ method, onClose, onSave }: {
-  method?: PaymentMethod;
-  onClose: () => void;
-  onSave: (method: PaymentMethod) => void;
-}) => {
-  const [formData, setFormData] = useState({
-    name: method?.name || '',
-    discountPercentage: method?.discountPercentage || 0,
-    isActive: method?.isActive ?? true
-  });
+export function Admin() {
+  const { 
+    users, 
+    paymentMethods, 
+    receiptTemplates, 
+    suppliers,
+    expenseCategories,
+    addUser, 
+    updateUser, 
+    deleteUser,
+    addPaymentMethod, 
+    updatePaymentMethod, 
+    deletePaymentMethod,
+    addReceiptTemplate,
+    updateReceiptTemplate,
+    deleteReceiptTemplate,
+    addSupplier,
+    updateSupplier,
+    addExpenseCategory,
+    deleteExpenseCategory
+  } = useData();
+  const { stores, addStore, updateStore, deleteStore } = useStore();
+  const { user: currentUser } = useAuth();
+  
+  const [activeTab, setActiveTab] = useState('users');
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [showStoreModal, setShowStoreModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [showSupplierModal, setShowSupplierModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editingStore, setEditingStore] = useState<Store | null>(null);
+  const [editingPayment, setEditingPayment] = useState<PaymentMethod | null>(null);
+  const [editingTemplate, setEditingTemplate] = useState<ReceiptTemplate | null>(null);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [newExpenseCategory, setNewExpenseCategory] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.name) {
-      alert('El nombre es requerido');
+  // ✅ Modal para crear/editar usuarios con contraseña
+  const UserModal = ({ user, onClose, onSave }: {
+    user?: User;
+    onClose: () => void;
+    onSave: (user: User) => void;
+  }) => {
+    const [formData, setFormData] = useState({
+      username: user?.username || '',
+      email: user?.email || '',
+      password: '', // Nueva contraseña
+      role: user?.role || 'employee' as 'admin' | 'employee',
+      storeId: user?.storeId || stores[0]?.id || '',
+      isActive: user?.isActive ?? true
+    });
+    const [showPassword, setShowPassword] = useState(false);
+    const [saving, setSaving] = useState(false);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      
+      if (!formData.username || !formData.email || !formData.storeId) {
+        alert('Por favor completa todos los campos requeridos');
+        return;
+      }
+
+      // Para nuevos usuarios, la contraseña es requerida
+      if (!user && !formData.password) {
+        alert('La contraseña es requerida para nuevos usuarios');
+        return;
+      }
+
+      setSaving(true);
+
+      try {
+        const userData: User = {
+          id: user?.id || crypto.randomUUID(),
+          username: formData.username,
+          email: formData.email,
+          role: formData.role,
+          storeId: formData.storeId,
+          isActive: formData.isActive,
+          createdAt: user?.createdAt || new Date(),
+          lastLogin: user?.lastLogin,
+          // ✅ Solo incluir hash de contraseña si se proporcionó una nueva
+          passwordHash: formData.password ? SupabaseService.hashPassword(formData.password) : user?.passwordHash
+        };
+
+        onSave(userData);
+        onClose();
+      } catch (error) {
+        alert('Error guardando usuario: ' + (error instanceof Error ? error.message : 'Error desconocido'));
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl max-w-md w-full">
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-gray-900">
+                {user ? 'Editar Usuario' : 'Nuevo Usuario'}
+              </h3>
+              <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Nombre de Usuario *
+                </label>
+                <input
+                  type="text"
+                  value={formData.username}
+                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email *
+                </label>
+                <input
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  required
+                />
+              </div>
+
+              {/* ✅ Campo de contraseña */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {user ? 'Nueva Contraseña (opcional)' : 'Contraseña *'}
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder={user ? 'Dejar vacío para mantener actual' : 'Ingresa contraseña'}
+                    required={!user}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                {!user && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Mínimo 6 caracteres. El usuario podrá cambiarla después.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Rol *
+                </label>
+                <select
+                  value={formData.role}
+                  onChange={(e) => setFormData({ ...formData, role: e.target.value as 'admin' | 'employee' })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  required
+                >
+                  <option value="employee">Empleado</option>
+                  <option value="admin">Administrador</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tienda *
+                </label>
+                <select
+                  value={formData.storeId}
+                  onChange={(e) => setFormData({ ...formData, storeId: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  required
+                >
+                  <option value="">Selecciona una tienda</option>
+                  {stores.filter(s => s.isActive).map(store => (
+                    <option key={store.id} value={store.id}>{store.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="isActive"
+                  checked={formData.isActive}
+                  onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="isActive" className="ml-2 block text-sm text-gray-700">
+                  Usuario activo
+                </label>
+              </div>
+
+              <div className="flex space-x-3 pt-4">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center justify-center space-x-2"
+                >
+                  {saving && <Save className="w-4 h-4 animate-spin" />}
+                  <span>{saving ? 'Guardando...' : (user ? 'Actualizar' : 'Crear')}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ✅ Función para eliminar usuario con confirmación
+  const handleDeleteUser = async (userId: string) => {
+    const userToDelete = users.find(u => u.id === userId);
+    if (!userToDelete) return;
+
+    // No permitir eliminar usuarios mock del sistema
+    const isMockUser = ['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'cccccccc-cccc-cccc-cccc-cccccccccccc'].includes(userId);
+    if (isMockUser) {
+      alert('No se pueden eliminar usuarios del sistema base');
       return;
     }
 
-    const newMethod: PaymentMethod = {
-      id: method?.id || Date.now().toString(),
-      ...formData
-    };
+    // No permitir auto-eliminación
+    if (userId === currentUser?.id) {
+      alert('No puedes eliminar tu propia cuenta');
+      return;
+    }
 
-    onSave(newMethod);
-    onClose();
+    const confirmed = window.confirm(
+      `¿Estás seguro de que quieres eliminar al usuario "${userToDelete.username}"?\n\n` +
+      'Esta acción desactivará el usuario y no podrá iniciar sesión.\n' +
+      'Esta acción no se puede deshacer.'
+    );
+
+    if (confirmed) {
+      try {
+        await deleteUser(userId);
+        alert('Usuario eliminado exitosamente');
+      } catch (error) {
+        alert('Error eliminando usuario: ' + (error instanceof Error ? error.message : 'Error desconocido'));
+      }
+    }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl max-w-md w-full">
-        <div className="p-6">
+  // ✅ Resto de modales simplificados (Store, PaymentMethod, etc.)
+  const StoreModal = ({ store, onClose, onSave }: {
+    store?: Store;
+    onClose: () => void;
+    onSave: (store: Store) => void;
+  }) => {
+    const [formData, setFormData] = useState({
+      name: store?.name || '',
+      address: store?.address || '',
+      phone: store?.phone || '',
+      email: store?.email || '',
+      isActive: store?.isActive ?? true
+    });
+
+    const handleSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      
+      if (!formData.name) {
+        alert('El nombre es requerido');
+        return;
+      }
+
+      const storeData: Store = {
+        id: store?.id || crypto.randomUUID(),
+        ...formData
+      };
+
+      onSave(storeData);
+      onClose();
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl max-w-md w-full p-6">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold text-gray-900">
-              {method ? 'Editar Método de Pago' : 'Nuevo Método de Pago'}
+              {store ? 'Editar Tienda' : 'Nueva Tienda'}
             </h3>
             <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
               <X className="w-6 h-6" />
@@ -66,9 +334,7 @@ const PaymentMethodModal = ({ method, onClose, onSave }: {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Nombre *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Nombre *</label>
               <input
                 type="text"
                 value={formData.name}
@@ -79,271 +345,17 @@ const PaymentMethodModal = ({ method, onClose, onSave }: {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Porcentaje de Descuento (%)
-              </label>
-              <input
-                type="number"
-                value={formData.discountPercentage}
-                onChange={(e) => setFormData({ ...formData, discountPercentage: Number(e.target.value) })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                min="0"
-                max="100"
-                step="0.1"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Descuento aplicado por usar este método de pago
-              </p>
-            </div>
-
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="isActive"
-                checked={formData.isActive}
-                onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-              />
-              <label htmlFor="isActive" className="ml-2 block text-sm text-gray-900">
-                Método activo
-              </label>
-            </div>
-
-            <div className="flex space-x-3 pt-4">
-              <button
-                type="button"
-                onClick={onClose}
-                className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                {method ? 'Actualizar' : 'Crear'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const UserModal = ({ user, onClose, onSave }: {
-  user?: User;
-  onClose: () => void;
-  onSave: (user: User) => void;
-}) => {
-  const { stores } = useStore();
-  const [formData, setFormData] = useState({
-    username: user?.username || '',
-    email: user?.email || '',
-    role: user?.role || 'employee' as 'admin' | 'employee',
-    storeId: user?.storeId || '',
-    isActive: user?.isActive ?? true
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.username || !formData.email || !formData.storeId) {
-      alert('Todos los campos son requeridos');
-      return;
-    }
-
-    const newUser: User = {
-      id: user?.id || Date.now().toString(),
-      ...formData,
-      createdAt: user?.createdAt || new Date()
-    };
-
-    onSave(newUser);
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl max-w-md w-full">
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xl font-bold text-gray-900">
-              {user ? 'Editar Usuario' : 'Nuevo Usuario'}
-            </h3>
-            <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Usuario *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Dirección</label>
               <input
                 type="text"
-                value={formData.username}
-                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Email *
-              </label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Rol *
-              </label>
-              <select
-                value={formData.role}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value as 'admin' | 'employee' })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              >
-                <option value="employee">Empleado</option>
-                <option value="admin">Administrador</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Tienda *
-              </label>
-              <select
-                value={formData.storeId}
-                onChange={(e) => setFormData({ ...formData, storeId: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              >
-                <option value="">Seleccionar tienda</option>
-                {stores.map(store => (
-                  <option key={store.id} value={store.id}>{store.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="userIsActive"
-                checked={formData.isActive}
-                onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-              />
-              <label htmlFor="userIsActive" className="ml-2 block text-sm text-gray-900">
-                Usuario activo
-              </label>
-            </div>
-
-            <div className="flex space-x-3 pt-4">
-              <button
-                type="button"
-                onClick={onClose}
-                className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                {user ? 'Actualizar' : 'Crear'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const SupplierModal = ({ supplier, onClose, onSave }: {
-  supplier?: Supplier;
-  onClose: () => void;
-  onSave: (supplier: Supplier) => void;
-}) => {
-  const [formData, setFormData] = useState({
-    name: supplier?.name || '',
-    email: supplier?.email || '',
-    phone: supplier?.phone || '',
-    address: supplier?.address || '',
-    contactPerson: supplier?.contactPerson || '',
-    isActive: supplier?.isActive ?? true
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.name) {
-      alert('El nombre es requerido');
-      return;
-    }
-
-    const newSupplier: Supplier = {
-      id: supplier?.id || Date.now().toString(),
-      ...formData
-    };
-
-    onSave(newSupplier);
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl max-w-md w-full">
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xl font-bold text-gray-900">
-              {supplier ? 'Editar Proveedor' : 'Nuevo Proveedor'}
-            </h3>
-            <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Nombre *
-              </label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Email
-              </label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                value={formData.address}
+                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Teléfono
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Teléfono</label>
               <input
                 type="tel"
                 value={formData.phone}
@@ -353,25 +365,11 @@ const SupplierModal = ({ supplier, onClose, onSave }: {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Dirección
-              </label>
-              <textarea
-                value={formData.address}
-                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                rows={3}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Persona de Contacto
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
               <input
-                type="text"
-                value={formData.contactPerson}
-                onChange={(e) => setFormData({ ...formData, contactPerson: e.target.value })}
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
@@ -379,13 +377,13 @@ const SupplierModal = ({ supplier, onClose, onSave }: {
             <div className="flex items-center">
               <input
                 type="checkbox"
-                id="supplierIsActive"
+                id="storeActive"
                 checked={formData.isActive}
                 onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
                 className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
               />
-              <label htmlFor="supplierIsActive" className="ml-2 block text-sm text-gray-900">
-                Proveedor activo
+              <label htmlFor="storeActive" className="ml-2 block text-sm text-gray-700">
+                Tienda activa
               </label>
             </div>
 
@@ -401,62 +399,59 @@ const SupplierModal = ({ supplier, onClose, onSave }: {
                 type="submit"
                 className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors"
               >
-                {supplier ? 'Actualizar' : 'Crear'}
+                {store ? 'Actualizar' : 'Crear'}
               </button>
             </div>
           </form>
         </div>
       </div>
-    </div>
-  );
-};
-
-const ReceiptTemplateModal = ({ template, onClose, onSave }: {
-  template?: ReceiptTemplate;
-  onClose: () => void;
-  onSave: (template: ReceiptTemplate) => void;
-}) => {
-  const { stores } = useStore();
-  const [formData, setFormData] = useState({
-    name: template?.name || '',
-    storeId: template?.storeId || '',
-    headerText: template?.headerText || '',
-    footerText: template?.footerText || '',
-    thermalWidth: template?.thermalWidth || 58,
-    fontSize: template?.fontSize || 11,
-    showDate: template?.showDate ?? true,
-    showEmployee: template?.showEmployee ?? true,
-    showCustomer: template?.showCustomer ?? true,
-    showInvoiceNumber: template?.showInvoiceNumber ?? true,
-    showPaymentMethod: template?.showPaymentMethod ?? true,
-    showItemDetails: template?.showItemDetails ?? true,
-    showTotals: template?.showTotals ?? true,
-    isActive: template?.isActive ?? true
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.name || !formData.storeId) {
-      alert('El nombre y la tienda son requeridos');
-      return;
-    }
-
-    const newTemplate: ReceiptTemplate = {
-      id: template?.id || Date.now().toString(),
-      ...formData,
-      showLogo: false,
-      logoUrl: ''
-    };
-
-    onSave(newTemplate);
-    onClose();
+    );
   };
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-auto">
-        <div className="p-6">
+  const ReceiptTemplateModal = ({ template, onClose, onSave }: {
+    template?: ReceiptTemplate;
+    onClose: () => void;
+    onSave: (template: ReceiptTemplate) => void;
+  }) => {
+    const [formData, setFormData] = useState({
+      name: template?.name || '',
+      storeId: template?.storeId || stores[0]?.id || '',
+      headerText: template?.headerText || '*** RECIBO DE VENTA ***\nNombre de la Tienda\nNIT: 123456789-1',
+      footerText: template?.footerText || '¡Gracias por su compra!\nwww.tienda.com',
+      thermalWidth: template?.thermalWidth || 58,
+      fontSize: template?.fontSize || 11,
+      showDate: template?.showDate ?? true,
+      showEmployee: template?.showEmployee ?? true,
+      showCustomer: template?.showCustomer ?? true,
+      showInvoiceNumber: template?.showInvoiceNumber ?? true,
+      showPaymentMethod: template?.showPaymentMethod ?? true,
+      showItemDetails: template?.showItemDetails ?? true,
+      showTotals: template?.showTotals ?? true,
+      isActive: template?.isActive ?? true
+    });
+
+    const handleSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      
+      if (!formData.name || !formData.storeId) {
+        alert('El nombre y la tienda son requeridos');
+        return;
+      }
+
+      const templateData: ReceiptTemplate = {
+        id: template?.id || crypto.randomUUID(),
+        ...formData,
+        showLogo: false,
+        logoUrl: ''
+      };
+
+      onSave(templateData);
+      onClose();
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-auto p-6">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold text-gray-900">
               {template ? 'Editar Plantilla' : 'Nueva Plantilla de Recibo'}
@@ -469,9 +464,7 @@ const ReceiptTemplateModal = ({ template, onClose, onSave }: {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Nombre *
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nombre *</label>
                 <input
                   type="text"
                   value={formData.name}
@@ -482,9 +475,7 @@ const ReceiptTemplateModal = ({ template, onClose, onSave }: {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Tienda *
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tienda *</label>
                 <select
                   value={formData.storeId}
                   onChange={(e) => setFormData({ ...formData, storeId: e.target.value })}
@@ -500,98 +491,34 @@ const ReceiptTemplateModal = ({ template, onClose, onSave }: {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Texto del Encabezado
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Texto del Encabezado</label>
               <textarea
                 value={formData.headerText}
                 onChange={(e) => setFormData({ ...formData, headerText: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 rows={4}
-                placeholder="*** RECIBO DE VENTA ***&#10;Nombre de la Tienda&#10;NIT: 123456789-1&#10;Dir: Dirección de la tienda"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Texto del Pie de Página
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Texto del Pie de Página</label>
               <textarea
                 value={formData.footerText}
                 onChange={(e) => setFormData({ ...formData, footerText: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 rows={3}
-                placeholder="¡Gracias por su compra!&#10;www.tienda.com&#10;Tel: +57 300 123 4567"
               />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Ancho Térmico (mm)
-                </label>
-                <select
-                  value={formData.thermalWidth}
-                  onChange={(e) => setFormData({ ...formData, thermalWidth: Number(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value={58}>58mm</option>
-                  <option value={80}>80mm</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Tamaño de Fuente
-                </label>
-                <input
-                  type="number"
-                  value={formData.fontSize}
-                  onChange={(e) => setFormData({ ...formData, fontSize: Number(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  min="8"
-                  max="16"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <h4 className="font-medium text-gray-900">Elementos a Mostrar</h4>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { key: 'showDate', label: 'Fecha' },
-                  { key: 'showEmployee', label: 'Empleado' },
-                  { key: 'showCustomer', label: 'Cliente' },
-                  { key: 'showInvoiceNumber', label: 'Número de Factura' },
-                  { key: 'showPaymentMethod', label: 'Método de Pago' },
-                  { key: 'showItemDetails', label: 'Detalle de Productos' },
-                  { key: 'showTotals', label: 'Totales' }
-                ].map(({ key, label }) => (
-                  <div key={key} className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id={key}
-                      checked={formData[key as keyof typeof formData] as boolean}
-                      onChange={(e) => setFormData({ ...formData, [key]: e.target.checked })}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor={key} className="ml-2 block text-sm text-gray-900">
-                      {label}
-                    </label>
-                  </div>
-                ))}
-              </div>
             </div>
 
             <div className="flex items-center">
               <input
                 type="checkbox"
-                id="templateIsActive"
+                id="templateActive"
                 checked={formData.isActive}
                 onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
                 className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
               />
-              <label htmlFor="templateIsActive" className="ml-2 block text-sm text-gray-900">
+              <label htmlFor="templateActive" className="ml-2 block text-sm text-gray-700">
                 Plantilla activa
               </label>
             </div>
@@ -614,78 +541,30 @@ const ReceiptTemplateModal = ({ template, onClose, onSave }: {
           </form>
         </div>
       </div>
-    </div>
-  );
-};
-
-export function Admin() {
-  const { 
-    paymentMethods, 
-    users, 
-    suppliers, 
-    receiptTemplates,
-    expenseCategories,
-    addPaymentMethod, 
-    updatePaymentMethod, 
-    deletePaymentMethod,
-    addUser,
-    updateUser,
-    addSupplier,
-    updateSupplier,
-    addReceiptTemplate,
-    updateReceiptTemplate,
-    deleteReceiptTemplate,
-    addExpenseCategory,
-    deleteExpenseCategory
-  } = useData();
-  const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('payment-methods');
-  const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
-  const [showUserModal, setShowUserModal] = useState(false);
-  const [showSupplierModal, setShowSupplierModal] = useState(false);
-  const [showReceiptTemplateModal, setShowReceiptTemplateModal] = useState(false);
-  const [editingPaymentMethod, setEditingPaymentMethod] = useState<PaymentMethod | null>(null);
-  const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
-  const [editingReceiptTemplate, setEditingReceiptTemplate] = useState<ReceiptTemplate | null>(null);
-  const [newExpenseCategory, setNewExpenseCategory] = useState('');
-
-  if (user?.role !== 'admin') {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Acceso Denegado</h2>
-          <p className="text-gray-600">Solo los administradores pueden acceder a esta sección.</p>
-        </div>
-      </div>
     );
-  }
+  };
 
   const tabs = [
-    { id: 'payment-methods', name: 'Métodos de Pago', icon: CreditCard },
     { id: 'users', name: 'Usuarios', icon: Users },
+    { id: 'stores', name: 'Tiendas', icon: StoreIcon },
+    { id: 'payments', name: 'Métodos de Pago', icon: CreditCard },
     { id: 'suppliers', name: 'Proveedores', icon: Truck },
     { id: 'receipt-templates', name: 'Plantillas de Recibo', icon: FileText },
-    { id: 'expense-categories', name: 'Categorías de Egresos', icon: Settings },
-    { id: 'reports', name: 'Reportes Financieros', icon: BarChart3 }
+    { id: 'expense-categories', name: 'Categorías de Egresos', icon: Settings }
   ];
-
-  const handleAddExpenseCategory = () => {
-    if (!newExpenseCategory.trim()) {
-      alert('Ingresa el nombre de la categoría');
-      return;
-    }
-    addExpenseCategory(newExpenseCategory.trim());
-    setNewExpenseCategory('');
-  };
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Administración</h1>
-        <p className="text-gray-600 mt-1">Configuración del sistema</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Administración</h1>
+          <p className="text-gray-600 mt-1">Gestión del sistema</p>
+        </div>
+        <div className="flex items-center space-x-2 text-sm text-gray-600">
+          <Shield className="w-4 h-4" />
+          <span>Admin: {currentUser?.username}</span>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -702,7 +581,7 @@ export function Admin() {
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
-                <tab.icon className="w-5 h-5" />
+                <tab.icon className="w-4 h-4" />
                 <span>{tab.name}</span>
               </button>
             ))}
@@ -710,90 +589,16 @@ export function Admin() {
         </div>
 
         <div className="p-6">
-          {/* Payment Methods Tab */}
-          {activeTab === 'payment-methods' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-gray-900">Métodos de Pago</h3>
-                <button
-                  onClick={() => setShowPaymentMethodModal(true)}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
-                >
-                  <Plus className="w-5 h-5" />
-                  <span>Nuevo Método</span>
-                </button>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Nombre
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Descuento
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Estado
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Acciones
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {paymentMethods.map(method => (
-                      <tr key={method.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {method.name}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {method.discountPercentage}%
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            method.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                          }`}>
-                            {method.isActive ? 'Activo' : 'Inactivo'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <button
-                            onClick={() => setEditingPaymentMethod(method)}
-                            className="text-blue-600 hover:text-blue-900 mr-3"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (confirm('¿Estás seguro de eliminar este método de pago?')) {
-                                deletePaymentMethod(method.id);
-                              }
-                            }}
-                            className="text-red-600 hover:text-red-900"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* Users Tab */}
+          {/* ✅ Tab de Usuarios mejorado */}
           {activeTab === 'users' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-gray-900">Usuarios</h3>
+                <h3 className="text-lg font-semibold text-gray-900">Gestión de Usuarios</h3>
                 <button
                   onClick={() => setShowUserModal(true)}
                   className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
                 >
-                  <Plus className="w-5 h-5" />
+                  <UserPlus className="w-4 h-4" />
                   <span>Nuevo Usuario</span>
                 </button>
               </div>
@@ -802,53 +607,215 @@ export function Admin() {
                 <table className="w-full">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Usuario
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Email
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Rol
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Estado
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Acciones
-                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Usuario</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rol</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tienda</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Último Login</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Acciones</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {users.map(user => (
-                      <tr key={user.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {user.username}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {user.email}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                  <tbody className="divide-y divide-gray-200">
+                    {users.map(user => {
+                      const userStore = stores.find(s => s.id === user.storeId);
+                      const isMockUser = ['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'cccccccc-cccc-cccc-cccc-cccccccccccc'].includes(user.id);
+                      
+                      return (
+                        <tr key={user.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-4">
+                            <div className="flex items-center">
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center mr-3 ${
+                                user.role === 'admin' ? 'bg-purple-100' : 'bg-blue-100'
+                              }`}>
+                                {user.role === 'admin' ? (
+                                  <Shield className={`w-4 h-4 text-purple-600`} />
+                                ) : (
+                                  <Users className={`w-4 h-4 text-blue-600`} />
+                                )}
+                              </div>
+                              <div>
+                                <div className="text-sm font-medium text-gray-900">{user.username}</div>
+                                {isMockUser && (
+                                  <div className="text-xs text-gray-500">Usuario del sistema</div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 text-sm text-gray-900">{user.email}</td>
+                          <td className="px-4 py-4">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              user.role === 'admin' 
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-blue-100 text-blue-800'
+                            }`}>
+                              {user.role === 'admin' ? 'Administrador' : 'Empleado'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 text-sm text-gray-900">{userStore?.name || 'N/A'}</td>
+                          <td className="px-4 py-4">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              user.isActive 
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-red-100 text-red-800'
+                            }`}>
+                              {user.isActive ? 'Activo' : 'Inactivo'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 text-sm text-gray-500">
+                            {user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Nunca'}
+                          </td>
+                          <td className="px-4 py-4 text-sm font-medium">
+                            <div className="flex space-x-2">
+                              <button
+                                onClick={() => setEditingUser(user)}
+                                className="text-blue-600 hover:text-blue-900"
+                                title="Editar usuario"
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                              {!isMockUser && user.id !== currentUser?.id && (
+                                <button
+                                  onClick={() => handleDeleteUser(user.id)}
+                                  className="text-red-600 hover:text-red-900"
+                                  title="Eliminar usuario"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {users.length === 0 && (
+                <div className="text-center py-8">
+                  <Users className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500">No hay usuarios registrados</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ✅ Tab de Tiendas */}
+          {activeTab === 'stores' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900">Gestión de Tiendas</h3>
+                <button
+                  onClick={() => setShowStoreModal(true)}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Nueva Tienda</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {stores.map(store => (
+                  <div key={store.id} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-semibold text-gray-900">{store.name}</h4>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => setEditingStore(store)}
+                          className="text-blue-600 hover:text-blue-900"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`¿Desactivar tienda "${store.name}"?`)) {
+                              deleteStore(store.id);
+                            }
+                          }}
+                          className="text-red-600 hover:text-red-900"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-1 text-sm text-gray-600">
+                      <p>{store.address}</p>
+                      <p>{store.phone}</p>
+                      <p>{store.email}</p>
+                    </div>
+                    <div className="mt-3">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        store.isActive 
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-red-100 text-red-800'
+                      }`}>
+                        {store.isActive ? 'Activa' : 'Inactiva'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ✅ Tab de Métodos de Pago */}
+          {activeTab === 'payments' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900">Métodos de Pago</h3>
+                <button
+                  onClick={() => setShowPaymentModal(true)}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Nuevo Método</span>
+                </button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Método</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Descuento</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {paymentMethods.map(method => (
+                      <tr key={method.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-4 text-sm font-medium text-gray-900">{method.name}</td>
+                        <td className="px-4 py-4 text-sm text-gray-900">{method.discountPercentage}%</td>
+                        <td className="px-4 py-4">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                            method.isActive 
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-red-100 text-red-800'
                           }`}>
-                            {user.role === 'admin' ? 'Administrador' : 'Empleado'}
+                            {method.isActive ? 'Activo' : 'Inactivo'}
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            user.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                          }`}>
-                            {user.isActive ? 'Activo' : 'Inactivo'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <button
-                            onClick={() => setEditingUser(user)}
-                            className="text-blue-600 hover:text-blue-900"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
+                        <td className="px-4 py-4 text-sm font-medium">
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => setEditingPayment(method)}
+                              className="text-blue-600 hover:text-blue-900"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`¿Desactivar método "${method.name}"?`)) {
+                                  deletePaymentMethod(method.id);
+                                }
+                              }}
+                              className="text-red-600 hover:text-red-900"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -858,7 +825,7 @@ export function Admin() {
             </div>
           )}
 
-          {/* Suppliers Tab */}
+          {/* ✅ Tab de Proveedores */}
           {activeTab === 'suppliers' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -867,80 +834,46 @@ export function Admin() {
                   onClick={() => setShowSupplierModal(true)}
                   className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
                 >
-                  <Plus className="w-5 h-5" />
+                  <Plus className="w-4 h-4" />
                   <span>Nuevo Proveedor</span>
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Nombre
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Contacto
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Persona de Contacto
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Estado
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Acciones
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {suppliers.map(supplier => (
-                      <tr key={supplier.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {supplier.name}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          <div>
-                            {supplier.email && <div>{supplier.email}</div>}
-                            {supplier.phone && <div>{supplier.phone}</div>}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {supplier.contactPerson || '-'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            supplier.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                          }`}>
-                            {supplier.isActive ? 'Activo' : 'Inactivo'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <button
-                            onClick={() => setEditingSupplier(supplier)}
-                            className="text-blue-600 hover:text-blue-900"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {suppliers.filter(s => s.isActive).map(supplier => (
+                  <div key={supplier.id} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-semibold text-gray-900">{supplier.name}</h4>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => setEditingSupplier(supplier)}
+                          className="text-blue-600 hover:text-blue-900"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-1 text-sm text-gray-600">
+                      <p>{supplier.email}</p>
+                      <p>{supplier.phone}</p>
+                      <p>{supplier.contactPerson}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
 
-          {/* Receipt Templates Tab */}
+          {/* Tab de Plantillas de Recibo */}
           {activeTab === 'receipt-templates' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-gray-900">Plantillas de Recibo</h3>
                 <button
-                  onClick={() => setShowReceiptTemplateModal(true)}
+                  onClick={() => setShowTemplateModal(true)}
                   className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
                 >
-                  <Plus className="w-5 h-5" />
+                  <Plus className="w-4 h-4" />
                   <span>Nueva Plantilla</span>
                 </button>
               </div>
@@ -949,69 +882,56 @@ export function Admin() {
                 <table className="w-full">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Nombre
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Tienda
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Formato
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Estado
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Acciones
-                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nombre</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tienda</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Acciones</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {receiptTemplates.map(template => (
-                      <tr key={template.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {template.name}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          Tienda {template.storeId}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {template.thermalWidth}mm, {template.fontSize}px
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            template.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                          }`}>
-                            {template.isActive ? 'Activa' : 'Inactiva'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <button
-                            onClick={() => setEditingReceiptTemplate(template)}
-                            className="text-blue-600 hover:text-blue-900 mr-3"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (confirm('¿Estás seguro de eliminar esta plantilla?')) {
-                                deleteReceiptTemplate(template.id);
-                              }
-                            }}
-                            className="text-red-600 hover:text-red-900"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                  <tbody className="divide-y divide-gray-200">
+                    {receiptTemplates.map(template => {
+                      const templateStore = stores.find(s => s.id === template.storeId);
+                      return (
+                        <tr key={template.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-4 text-sm font-medium text-gray-900">{template.name}</td>
+                          <td className="px-4 py-4 text-sm text-gray-900">{templateStore?.name || 'N/A'}</td>
+                          <td className="px-4 py-4">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              template.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                            }`}>
+                              {template.isActive ? 'Activa' : 'Inactiva'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 text-sm font-medium">
+                            <div className="flex space-x-2">
+                              <button
+                                onClick={() => setEditingTemplate(template)}
+                                className="text-blue-600 hover:text-blue-900"
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (window.confirm(`¿Eliminar plantilla "${template.name}"?`)) {
+                                    deleteReceiptTemplate(template.id);
+                                  }
+                                }}
+                                className="text-red-600 hover:text-red-900"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             </div>
           )}
 
-          {/* Expense Categories Tab */}
+          {/* Tab de Categorías de Egresos */}
           {activeTab === 'expense-categories' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -1025,10 +945,15 @@ export function Admin() {
                     className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                   <button
-                    onClick={handleAddExpenseCategory}
+                    onClick={() => {
+                      if (newExpenseCategory.trim()) {
+                        addExpenseCategory(newExpenseCategory.trim());
+                        setNewExpenseCategory('');
+                      }
+                    }}
                     className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
                   >
-                    <Plus className="w-5 h-5" />
+                    <Plus className="w-4 h-4" />
                     <span>Agregar</span>
                   </button>
                 </div>
@@ -1040,7 +965,7 @@ export function Admin() {
                     <span className="font-medium text-gray-900">{category}</span>
                     <button
                       onClick={() => {
-                        if (confirm(`¿Estás seguro de eliminar la categoría "${category}"?`)) {
+                        if (window.confirm(`¿Eliminar categoría "${category}"?`)) {
                           deleteExpenseCategory(category);
                         }
                       }}
@@ -1051,27 +976,19 @@ export function Admin() {
                   </div>
                 ))}
               </div>
+
+              {expenseCategories.length === 0 && (
+                <div className="text-center py-8">
+                  <Settings className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500">No hay categorías de egresos</p>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
-      {activeTab === 'reports' && <FinancialReports />}
-      {/* Modals */}
-      {showPaymentMethodModal && (
-        <PaymentMethodModal
-          onClose={() => setShowPaymentMethodModal(false)}
-          onSave={(method) => addPaymentMethod(method)}
-        />
-      )}
 
-      {editingPaymentMethod && (
-        <PaymentMethodModal
-          method={editingPaymentMethod}
-          onClose={() => setEditingPaymentMethod(null)}
-          onSave={(method) => updatePaymentMethod(method)}
-        />
-      )}
-
+      {/* ✅ Modales */}
       {showUserModal && (
         <UserModal
           onClose={() => setShowUserModal(false)}
@@ -1087,32 +1004,32 @@ export function Admin() {
         />
       )}
 
-      {showSupplierModal && (
-        <SupplierModal
-          onClose={() => setShowSupplierModal(false)}
-          onSave={(supplier) => addSupplier(supplier)}
+      {showStoreModal && (
+        <StoreModal
+          onClose={() => setShowStoreModal(false)}
+          onSave={(store) => addStore(store)}
         />
       )}
 
-      {editingSupplier && (
-        <SupplierModal
-          supplier={editingSupplier}
-          onClose={() => setEditingSupplier(null)}
-          onSave={(supplier) => updateSupplier(supplier)}
+      {editingStore && (
+        <StoreModal
+          store={editingStore}
+          onClose={() => setEditingStore(null)}
+          onSave={(store) => updateStore(store)}
         />
       )}
 
-      {showReceiptTemplateModal && (
+      {showTemplateModal && (
         <ReceiptTemplateModal
-          onClose={() => setShowReceiptTemplateModal(false)}
+          onClose={() => setShowTemplateModal(false)}
           onSave={(template) => addReceiptTemplate(template)}
         />
       )}
 
-      {editingReceiptTemplate && (
+      {editingTemplate && (
         <ReceiptTemplateModal
-          template={editingReceiptTemplate}
-          onClose={() => setEditingReceiptTemplate(null)}
+          template={editingTemplate}
+          onClose={() => setEditingTemplate(null)}
           onSave={(template) => updateReceiptTemplate(template)}
         />
       )}

@@ -88,14 +88,14 @@ export function Expenses() {
       const expenseDate = new Date(fullDateString);
 
       const newExpense: Expense = {
-        id: Date.now().toString(),
-        storeId: currentStore?.id || '1',
+        id: crypto.randomUUID(),
+        storeId: currentStore?.id || '11111111-1111-1111-1111-111111111111',
         description: formData.description,
         amount: formData.amount,
         category: formData.category,
         paymentMethod: formData.paymentMethod,
         date: expenseDate,
-        employeeId: user?.id || '1'
+        employeeId: user?.id || 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
       };
 
       onSave(newExpense);

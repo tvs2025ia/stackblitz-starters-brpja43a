@@ -112,13 +112,13 @@ export function Purchases() {
       }
 
       const newPurchase: Purchase = {
-        id: Date.now().toString(),
-        storeId: currentStore?.id || '1',
+        id: crypto.randomUUID(),
+        storeId: currentStore?.id || '11111111-1111-1111-1111-111111111111',
         supplierId: selectedSupplierId || undefined,
         items,
         total,
         date: new Date(),
-        employeeId: user?.id || '1',
+        employeeId: user?.id || 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
         invoiceNumber: invoiceNumber || undefined
       };
 

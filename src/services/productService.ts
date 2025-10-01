@@ -1,5 +1,8 @@
 import { supabase } from '../lib/supabase';
 import { Product } from '../types';
+import { SupabaseService } from './supabaseService';
+import { ImageUtils } from '../utils/imageUtils';
+import { LocalImageService } from './localImageService';
 
 export interface BulkProductData {
   name: string;
@@ -17,11 +20,14 @@ export class ProductService {
     const success: Product[] = [];
     const errors: string[] = [];
 
-    for (let i = 0; i < products.length; i++) {
-      const productData = products[i];
-      const rowNumber = i + 2; // +2 because CSV starts at row 2 (after header)
+    try {
+      // Validate all products first
+      const validProducts: BulkProductData[] = [];
+      
+      for (let i = 0; i < products.length; i++) {
+        const productData = products[i];
+        const rowNumber = i + 2; // +2 because CSV starts at row 2 (after header)
 
-      try {
         // Validate required fields
         if (!productData.name || !productData.sku || !productData.category) {
           errors.push(`Fila ${rowNumber}: Faltan campos requeridos (nombre, SKU, categoría)`);
@@ -49,41 +55,38 @@ export class ProductService {
           continue;
         }
 
-        // Check if SKU already exists
-        const { data: existingProduct } = await supabase
-          .from('prestashop_products')
-          .select('id')
-          .eq('reference', productData.sku)
-          .single();
+        validProducts.push(productData);
+      }
 
-        if (existingProduct) {
+      if (validProducts.length === 0) {
+        return { success, errors };
+      }
+
+      // Get all existing SKUs in one query for performance (table-agnostic)
+      const skus = validProducts.map(p => p.sku);
+      let existingSkus: Set<string>;
+      try {
+        existingSkus = await SupabaseService.getExistingSkus(skus);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Error desconocido';
+        errors.push(`Error verificando SKUs existentes: ${msg}`);
+        return { success, errors };
+      }
+
+      // Filter out products with existing SKUs
+      const newProducts: Product[] = [];
+      
+      validProducts.forEach((productData, index) => {
+        const rowNumber = index + 2;
+        
+        if (existingSkus.has(productData.sku)) {
           errors.push(`Fila ${rowNumber}: El SKU "${productData.sku}" ya existe`);
-          continue;
-        }
-
-        // Insert product into Supabase
-        const { data, error } = await supabase
-          .from('prestashop_products')
-          .insert({
-            prestashop_id: Date.now() + i, // Temporary ID for demo
-            name: productData.name,
-            reference: productData.sku,
-            price: productData.price,
-            category_id: 1, // Default category for demo
-            stock_quantity: productData.stock,
-            active: true
-          })
-          .select()
-          .single();
-
-        if (error) {
-          errors.push(`Fila ${rowNumber}: Error al guardar - ${error.message}`);
-          continue;
+          return;
         }
 
         // Create local Product object
         const newProduct: Product = {
-          id: data.id,
+          id: crypto.randomUUID(),
           name: productData.name,
           sku: productData.sku,
           category: productData.category,
@@ -95,11 +98,23 @@ export class ProductService {
           imageUrl: productData.imageUrl
         };
 
-        success.push(newProduct);
+        newProducts.push(newProduct);
+      });
 
-      } catch (error) {
-        errors.push(`Fila ${rowNumber}: Error inesperado - ${error instanceof Error ? error.message : 'Error desconocido'}`);
+      if (newProducts.length === 0) {
+        return { success, errors };
       }
+
+      // Bulk insert all valid products at once for much better performance
+      const insertedProducts = await SupabaseService.bulkUpsertProducts(newProducts);
+      success.push(...insertedProducts);
+
+      console.log(`✅ Bulk upload completado: ${success.length} productos guardados, ${errors.length} errores`);
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      errors.push(`Error general del sistema: ${errorMessage}`);
+      console.error('Error en bulk upload:', error);
     }
 
     return { success, errors };
@@ -107,30 +122,75 @@ export class ProductService {
 
   static async syncProductsFromSupabase(storeId: string): Promise<Product[]> {
     try {
-      const { data, error } = await supabase
-        .from('prestashop_products')
-        .select('*')
-        .eq('active', true);
-
-      if (error) {
-        throw new Error(`Error al sincronizar productos: ${error.message}`);
-      }
-
-      return data.map(item => ({
-        id: item.id,
-        name: item.name,
-        sku: item.reference || `SKU-${item.id}`,
-        category: 'General', // Default category
-        price: item.price || 0,
-        cost: item.price ? item.price * 0.7 : 0, // Estimate 30% margin
-        stock: item.stock_quantity || 0,
-        minStock: 5, // Default min stock
-        storeId: storeId,
-        imageUrl: undefined
-      }));
+      console.log('🔄 Sincronizando productos desde Supabase...');
+      
+      // Use the optimized SupabaseService method
+      const products = await SupabaseService.getAllProducts(storeId);
+      
+      console.log(`✅ ${products.length} productos sincronizados desde Supabase`);
+      return products;
 
     } catch (error) {
       console.error('Error syncing products:', error);
+      throw error;
+    }
+  }
+
+  static async uploadProductImage(file: File, productId: string): Promise<string> {
+    try {
+      console.log(`📷 Subiendo imagen para producto ${productId} a carpeta local...`);
+
+      // Validate image
+      if (!ImageUtils.isValidImage(file)) {
+        throw new Error('Archivo de imagen inválido o muy grande (máximo 10MB)');
+      }
+
+      // Optimize image before saving (max 800px, 85% quality)
+      const optimizedFile = await ImageUtils.optimizeImage(file, 800, 800, 0.85);
+
+      console.log(`📷 Imagen optimizada: ${file.size} bytes → ${optimizedFile.size} bytes`);
+
+      // Save to local public/img folder instead of Supabase
+      const imageUrl = await LocalImageService.saveProductImage(optimizedFile, productId);
+
+      console.log(`✅ Imagen guardada localmente: ${imageUrl}`);
+      return imageUrl;
+
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Creates thumbnails for product images
+   */
+  static async createProductThumbnails(file: File, productId: string): Promise<{
+    small: string;
+    medium: string;
+    large: string;
+  }> {
+    try {
+      console.log(`📷 Creando miniaturas para producto ${productId}...`);
+
+      const thumbnails = await ImageUtils.createThumbnails(file);
+
+      const [smallUrl, mediumUrl, largeUrl] = await Promise.all([
+        SupabaseService.uploadProductImage(thumbnails.small, `${productId}_small`),
+        SupabaseService.uploadProductImage(thumbnails.medium, `${productId}_medium`),
+        SupabaseService.uploadProductImage(thumbnails.large, `${productId}_large`)
+      ]);
+
+      console.log(`✅ Miniaturas creadas exitosamente`);
+
+      return {
+        small: smallUrl,
+        medium: mediumUrl,
+        large: largeUrl
+      };
+
+    } catch (error) {
+      console.error('Error creating thumbnails:', error);
       throw error;
     }
   }
